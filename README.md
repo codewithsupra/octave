@@ -10,19 +10,33 @@ Octave gives every agent its own git worktree, ports and env files, like other p
 | Ten finished diffs, and you don't know where to start. | **Review Queue** gives each diff an explainable risk score (destructive SQL, auth, CI, lockfiles, missing tests, deletions, size) and orders your review. |
 | "Was it worth paying for five agents?" | **Tournament** gives one task to N agents, runs your tests in every worktree, and ranks the results by pass, risk, then diff size. Keep the winner and archive the rest. |
 
-![Conflict radar](docs/radar.png)
+![Landing page](docs/landing.png)
+
+![Conflict radar](web/public/shots/radar.png)
+
+## Try it in 10 seconds
+
+Open **`/demo`**. It's the real Octave UI and the real risk and ranking code, driven by simulated agents in your browser. No install, no keys. Open the Conflict radar, click a red cell, and warn an agent: it moves its change and the conflict clears.
 
 ## Quick start
 
 ```bash
 npm install
-npm start            # builds the UI and serves http://localhost:7420
+cp .env.example .env.local   # or: clerk env pull
+npm start                    # builds the UI and serves http://localhost:7420
 ```
 
-To see every feature without any API keys, open a second terminal and run:
+| Route | What it is |
+|---|---|
+| `/` | Landing page |
+| `/demo` | Interactive demo (fully client-side) |
+| `/sign-in`, `/sign-up` | Clerk |
+| `/app` | Your Octave: real worktrees, real agents |
+
+To seed your local install with scripted agents and a tournament on a sample repo:
 
 ```bash
-npm run demo         # seeds a demo repo with scripted agents and a tournament
+npm run demo
 ```
 
 Then add your own repo from the UI and start Claude Code, Codex, Gemini CLI, OpenCode, Cursor Agent, Aider, or any command (`my-agent --task {prompt}`).
@@ -51,8 +65,8 @@ Requirements: Node 20+ and git 2.38+. Runs on macOS and Linux, and on Windows vi
 
 | | |
 |---|---|
-| ![Review queue](docs/review.png) | ![Tournament](docs/tournament.png) |
-| ![Workspace](docs/workspace.png) | |
+| ![Review queue](web/public/shots/review.png) | ![Tournament](web/public/shots/tournament.png) |
+| ![Workspace](web/public/shots/workspace.png) | ![Sign in](docs/sign-in.png) |
 
 ## How it works
 
@@ -71,13 +85,19 @@ Node server (Express + ws), bound to 127.0.0.1
 
 **The snapshot trick.** To diff or merge work the agent hasn't committed, Octave builds a commit from the worktree with a *throwaway index* (`GIT_INDEX_FILE` → `read-tree HEAD` → `add -A` → `write-tree` → `commit-tree`). The agent's real index and files are never touched. Dates are pinned, so the same content always gives the same SHA. That makes snapshots content-addressed, so diff and merge results are cached across polls and the radar only recomputes pairs that actually changed.
 
-**Security.** The server can spawn shells, so it binds to loopback only and rejects any request or WebSocket whose `Host` or `Origin` isn't local. That blocks DNS-rebinding and cross-site WebSocket hijacking from a malicious web page. Agent shells get a clean environment, with package-manager and Octave-internal variables stripped.
+**Auth (Clerk).** When Clerk keys are present, every `/api` route and WebSocket requires a valid session token. Tokens are verified server-side and must be minted for Octave's own origin (`authorizedParties`). Browsers can't set headers on a WebSocket and tokens don't belong in URLs, so sockets authenticate with their first message. Signing in isn't enough by itself: the **first account to sign in becomes the owner**, and every other account gets a 403, unless it's listed in `OCTAVE_ALLOWED_USERS`. That matters because this server runs shells. With `OCTAVE_PUBLIC_URL` set, Octave can serve a remote machine, but it refuses to start that way without Clerk. Without keys, Octave runs in local-only mode.
+
+**Security.** The server can spawn shells, so by default it binds to loopback only and rejects any request or WebSocket whose `Host` or `Origin` isn't local. That blocks DNS-rebinding and cross-site WebSocket hijacking from a malicious web page. Agent shells get a clean environment, with package-manager and Octave-internal variables stripped.
+
+## Deploying the landing page and demo
+
+The landing page and `/demo` need no server. `vercel.json` builds them as a static site, where `/app` explains how to install. The app itself always runs on your own machine.
 
 ## Development
 
 ```bash
 npm run dev          # server (tsx watch) + Vite dev server on :5173
-npm test             # vitest: real git repos + real PTYs, no mocks
+npm test             # vitest: real git repos + real PTYs, auth gate, demo simulator
 npm run typecheck
 ```
 

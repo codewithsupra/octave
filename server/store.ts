@@ -51,6 +51,7 @@ export interface Tournament {
 }
 
 export interface State {
+  owner?: { userId: string; claimedAt: number };
   projects: Project[];
   workspaces: Workspace[];
   tournaments: Tournament[];

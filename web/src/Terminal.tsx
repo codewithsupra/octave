@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { wsUrl } from "./api";
+import { currentBackend } from "./api";
 
 const theme = {
   background: "#151A27",
@@ -35,25 +35,22 @@ export function Terminal({ workspaceId, generation }: { workspaceId: string; gen
     term.loadAddon(fit);
     term.open(el);
 
-    const ws = new WebSocket(wsUrl(`/ws/term/${workspaceId}`));
-    const send = (m: object) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m));
+    const conn = currentBackend().terminal(workspaceId, {
+      onOut: (d) => term.write(d),
+      onExit: (code) => term.write(`\r\n\x1b[2m[process exited with code ${code}]\x1b[0m\r\n`),
+      onClose: (reason, code) => { if (code >= 4000 || code === 1008) term.write(`\r\n\x1b[31m${reason}\x1b[0m\r\n`); },
+    });
     const doFit = () => {
       try {
         fit.fit();
-        send({ t: "resize", c: term.cols, r: term.rows });
+        conn.send({ t: "resize", c: term.cols, r: term.rows });
       } catch {}
     };
-    ws.onopen = () => { doFit(); term.focus(); };
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.t === "out") term.write(m.d);
-      else if (m.t === "exit") term.write(`\r\n\x1b[2m[process exited with code ${m.code}]\x1b[0m\r\n`);
-    };
-    ws.onclose = (e) => { if (e.code === 1008) term.write(`\r\n\x1b[31m${e.reason}\x1b[0m\r\n`); };
-    const sub = term.onData((d) => send({ t: "in", d }));
+    requestAnimationFrame(() => { doFit(); term.focus(); });
+    const sub = term.onData((d) => conn.send({ t: "in", d }));
     const ro = new ResizeObserver(() => requestAnimationFrame(doFit));
     ro.observe(el);
-    return () => { ro.disconnect(); sub.dispose(); ws.close(); term.dispose(); };
+    return () => { ro.disconnect(); sub.dispose(); conn.close(); term.dispose(); };
   }, [workspaceId, generation]);
 
   return <div className="term" ref={host} />;

@@ -103,8 +103,23 @@ textarea { resize: vertical; }
 .ws-group .clampline { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-agent { color: var(--muted); font-size: 11.5px; }
-.side-foot { padding: 10px 16px; border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-foot code { background: none; padding: 0; }
+.side-foot { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; min-width: 0; }
+.side-foot code { background: none; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* demo + auth chrome */
+.app.has-banner { grid-template-rows: auto minmax(0, 1fr); }
+.app.has-banner > .demo-banner { grid-column: 1 / -1; }
+.demo-banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding: 8px 16px; background: #2B2F55; border-bottom: 1px solid #45498A; font-size: 13px; }
+.demo-banner a { color: var(--accent); }
+.demo-banner .btn { color: var(--accent-ink); }
+a.btn { display: inline-block; background: var(--accent); color: var(--accent-ink); border-radius: var(--r-sm); padding: 7px 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+a.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+a.btn:hover { filter: brightness(1.08); }
+.narrow { max-width: 46ch; text-align: center; }
+.install { background: var(--ink-deep); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; font: 13px/1.6 var(--mono); text-align: left; }
+.auth-page { min-height: 100%; display: grid; place-content: center; justify-items: center; gap: 22px; padding: 40px 16px; }
+.auth-page .brand { color: var(--text); text-decoration: none; padding: 0; }
+.boot h2 { margin-top: 6px; }
 .main { min-width: 0; min-height: 0; overflow: auto; }
 
 /* pages */
@@ -254,6 +269,7 @@ button.cell:hover { filter: brightness(1.15); }
 }
 @media (max-width: 720px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .app.has-banner { grid-template-rows: auto auto minmax(0, 1fr); }
   .sidebar, .main { min-width: 0; }
   .sidebar { max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line); }
   .page { padding: 20px 16px 40px; }

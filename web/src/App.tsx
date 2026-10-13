@@ -16,7 +16,7 @@ function readRoute(): Route {
   return { view: "home" };
 }
 
-export function App() {
+export function App({ mode = "local", banner, account }: { mode?: "local" | "authed" | "demo"; banner?: ReactNode; account?: ReactNode }) {
   const { state, connected } = useAppState();
   const [route, setRoute] = useState<Route>(readRoute);
   const [projectId, setProjectId] = useState<string | null>(() => localStorageGet("octave.project"));
@@ -59,7 +59,8 @@ export function App() {
   const current = route.view === "ws" ? state.workspaces.find((w) => w.id === route.id) : undefined;
 
   return (
-    <div className="app">
+    <div className={`app ${banner ? "has-banner" : ""}`} data-mode={mode}>
+      {banner}
       <nav className="sidebar" aria-label="Workspaces">
         <div className="brand"><Logo /><span>Octave</span>{!connected && <span className="offline" title="Reconnecting">offline</span>}</div>
 
@@ -100,7 +101,10 @@ export function App() {
             </ul>
           </>
         )}
-        <footer className="side-foot muted small">{project ? <code title={project.path}>{project.path.replace(/^\/Users\/[^/]+/, "~")}</code> : null}</footer>
+        <footer className="side-foot muted small">
+          {account}
+          {project ? <code title={project.path}>{project.path.replace(/^\/Users\/[^/]+/, "~")}</code> : null}
+        </footer>
       </nav>
 
       <main className="main">

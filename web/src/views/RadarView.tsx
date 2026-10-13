@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { api, usePoll } from "../api";
 import type { AppState, Project, Radar, RadarPair, Workspace } from "../types";
-import { StatusDot, ago, useAsync } from "../ui";
+import { StatusDot, ago, displayName, useAsync } from "../ui";
 
 export function RadarView({ project, state, onOpen }: { project: Project; state: AppState; onOpen: (id: string) => void }) {
   const { data: radar, error } = usePoll<Radar>(`/api/projects/${project.id}/radar`, 4000);
@@ -55,7 +55,7 @@ export function RadarView({ project, state, onOpen }: { project: Project; state:
             <div className="matrix" style={{ gridTemplateColumns: `minmax(120px, 180px) repeat(${ids.length}, minmax(44px, 64px))` }}>
               <div />
               {ids.map((id) => (
-                <div key={id} className="mx-col" title={wsById.get(id)!.name}><span>{wsById.get(id)!.name}</span></div>
+                <div key={id} className="mx-col" title={wsById.get(id)!.name}><span>{displayName(wsById.get(id)!.name)}</span></div>
               ))}
               {ids.map((row) => (
                 <Row key={row} row={row} ids={ids} wsById={wsById} pairOf={pairOf} drift={radar.baseConflicts[row]} sel={current ?? null} onSel={setSel} state={state} />
@@ -102,7 +102,7 @@ function Row({ row, ids, wsById, pairOf, drift, sel, onSel, state }: {
 }) {
   return (
     <>
-      <div className="mx-row"><StatusDot status={state.statuses[row]?.status} /> <span title={wsById.get(row)!.name}>{wsById.get(row)!.name}</span></div>
+      <div className="mx-row"><StatusDot status={state.statuses[row]?.status} /> <span title={wsById.get(row)!.name}>{displayName(wsById.get(row)!.name)}</span></div>
       {ids.map((col) => {
         if (col === row) {
           return <div key={col} className={`cell self ${drift ? "drift" : ""}`} title={drift ? `Conflicts with base: ${drift.join(", ")}` : "Same workspace"} />;

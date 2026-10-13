@@ -83,3 +83,16 @@ export function ago(ts: number) {
 export function agentLabel(agent: string) {
   return agent.startsWith("custom:") ? "custom" : agent;
 }
+
+export function Mark() {
+  return (
+    <svg className="logo" viewBox="0 0 32 32" aria-hidden="true">
+      <path d="M12 22a3 3 0 1 1-3-3h3V8l11-2v13a3 3 0 1 1-3-3h3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Tournament entrants are named t-<id>-<agent>-<n>; show just <agent>-<n>. */
+export function displayName(name: string) {
+  return name.replace(/^t-[0-9a-f]+-/, "");
+}

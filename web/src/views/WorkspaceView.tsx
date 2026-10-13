@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, usePoll } from "../api";
 import { Terminal } from "../Terminal";
 import type { AppState, Diff, Workspace } from "../types";
-import { RiskBadge, StatusDot, statusLabel, toast, useAsync } from "../ui";
+import { RiskBadge, StatusDot, displayName, statusLabel, toast, useAsync } from "../ui";
 
 export function WorkspaceView({ ws, state, onRemoved }: { ws: Workspace; state: AppState; onRemoved: () => void }) {
   const info = state.statuses[ws.id];
@@ -20,7 +20,7 @@ export function WorkspaceView({ ws, state, onRemoved }: { ws: Workspace; state: 
         <div className="ws-title">
           <StatusDot status={info?.status} />
           <div>
-            <h1>{ws.name}</h1>
+            <h1>{displayName(ws.name)}</h1>
             <p className="meta">
               <code>{ws.branch}</code> from <code>{ws.baseBranch}</code>
               <span className="sep" />

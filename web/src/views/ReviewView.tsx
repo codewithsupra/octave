@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { usePoll } from "../api";
 import type { AppState, Project, Risk, Status } from "../types";
-import { RiskBadge, StatusDot, agentLabel, statusLabel } from "../ui";
+import { RiskBadge, StatusDot, agentLabel, displayName, statusLabel } from "../ui";
 
 interface Item { workspaceId: string; status: Status; risk: Risk; ready: boolean }
 
@@ -48,7 +48,7 @@ export function ReviewView({ project, state, onOpen }: { project: Project; state
               <div className="q-main">
                 <div className="q-title">
                   <StatusDot status={i.status} />
-                  <button className="link strong" onClick={() => onOpen(w.id)}>{w.name}</button>
+                  <button className="link strong" onClick={() => onOpen(w.id)}>{displayName(w.name)}{w.tournamentId ? " (tournament winner)" : ""}</button>
                   <span className="muted small">{agentLabel(w.agent)}, {statusLabel(i.status).toLowerCase()}</span>
                 </div>
                 {w.prompt && <p className="q-task">{w.prompt}</p>}

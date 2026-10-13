@@ -5,33 +5,70 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyToken } from "@clerk/express";
 import { WebSocketServer, type WebSocket } from "ws";
 import { PRESETS, onPath } from "./agents";
+import { Gate, tokenFrom } from "./auth";
 import { git } from "./git";
 import { Octave } from "./octave";
 import { HttpError, Store } from "./store";
 
-const PORT = Number(process.env.OCTAVE_PORT ?? 7420);
-const HOST = "127.0.0.1";
-const HOME = process.env.OCTAVE_HOME ?? path.join(os.homedir(), ".octave");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Clerk keys from `clerk env pull` (.env.local) or a hand-written .env.
+for (const f of [".env.local", ".env"]) {
+  const file = path.join(ROOT, f);
+  if (existsSync(file)) process.loadEnvFile(file);
+}
+
+const PORT = Number(process.env.OCTAVE_PORT ?? 7420);
+const HOME = process.env.OCTAVE_HOME ?? path.join(os.homedir(), ".octave");
+const SECRET_KEY = process.env.CLERK_SECRET_KEY;
+const PUBLISHABLE_KEY = process.env.CLERK_PUBLISHABLE_KEY ?? process.env.VITE_CLERK_PUBLISHABLE_KEY;
+// Remote access (e.g. Octave on a GPU box): set OCTAVE_PUBLIC_URL. Only allowed with auth on.
+const PUBLIC_URL = process.env.OCTAVE_PUBLIC_URL ? new URL(process.env.OCTAVE_PUBLIC_URL) : null;
+if (PUBLIC_URL && !SECRET_KEY) {
+  console.error("OCTAVE_PUBLIC_URL requires Clerk auth (CLERK_SECRET_KEY). Refusing to expose shells without sign-in.");
+  process.exit(1);
+}
+const HOST = PUBLIC_URL ? "0.0.0.0" : "127.0.0.1";
 
 const store = new Store(HOME);
 const octave = new Octave(store);
+
+// Tokens are only accepted when minted for one of our own origins.
+const authorizedParties = [
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
+  "http://localhost:5173",
+  ...(PUBLIC_URL ? [PUBLIC_URL.origin] : []),
+];
+const gate = new Gate(
+  store,
+  SECRET_KEY
+    ? async (token) => {
+        const claims = await verifyToken(token, { secretKey: SECRET_KEY, authorizedParties });
+        return claims?.sub ? { userId: claims.sub } : null;
+      }
+    : null,
+  (process.env.OCTAVE_ALLOWED_USERS ?? "").split(",").map((x) => x.trim()).filter(Boolean),
+);
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 // ---------- security: this server can spawn shells, so lock it to localhost ----------
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 function isLocalHost(host?: string): boolean {
   if (!host) return false;
+  if (PUBLIC_URL && host === PUBLIC_URL.host) return true;
   return LOCAL_HOSTS.has(host.replace(/:\d+$/, ""));
 }
 function isLocalOrigin(origin?: string): boolean {
   if (!origin) return true; // non-browser clients (curl, CLI)
   try {
-    return LOCAL_HOSTS.has(new URL(origin).hostname) || new URL(origin).hostname === "::1";
+    const u = new URL(origin);
+    if (PUBLIC_URL && u.origin === PUBLIC_URL.origin) return true;
+    return LOCAL_HOSTS.has(u.hostname);
   } catch {
     return false;
   }
@@ -57,6 +94,27 @@ const h =
   };
 
 const p = (req: Request, k: string) => String(req.params[k]);
+
+// ---------- auth ----------
+
+/** Public: tells the UI whether to show Clerk, and with which key. */
+app.get("/api/config", (_req, res) => {
+  res.json({ authEnabled: gate.enabled, publishableKey: gate.enabled ? PUBLISHABLE_KEY ?? null : null });
+});
+
+app.use("/api", async (req, res, next) => {
+  const r = await gate.check(tokenFrom(req.headers));
+  if (!r.ok) {
+    res.status(r.status).json({ error: r.error });
+    return;
+  }
+  res.locals.userId = r.userId;
+  next();
+});
+
+app.get("/api/me", (_req, res) => {
+  res.json({ userId: res.locals.userId, owner: store.state.owner?.userId === res.locals.userId });
+});
 
 // ---------- API ----------
 
@@ -227,13 +285,51 @@ server.on("upgrade", (req, socket, head) => {
     return socket.destroy();
   }
   const url = new URL(req.url ?? "/", "http://localhost");
+  const headerToken = tokenFrom(req.headers);
   wss.handleUpgrade(req, socket, head, (ws) => {
-    if (url.pathname === "/ws/events") return attachEvents(ws);
-    const m = url.pathname.match(/^\/ws\/term\/([\w-]+)$/);
-    if (m) return attachTerminal(ws, m[1]);
-    ws.close(1008, "unknown endpoint");
+    const route = () => {
+      if (url.pathname === "/ws/events") return attachEvents(ws);
+      const m = url.pathname.match(/^\/ws\/term\/([\w-]+)$/);
+      if (m) return attachTerminal(ws, m[1]);
+      ws.close(1008, "unknown endpoint");
+    };
+    authenticate(ws, headerToken).then((ok) => ok && route());
   });
 });
+
+/**
+ * Browsers can't set headers on a WebSocket and tokens don't belong in URLs,
+ * so when the cookie isn't present the client's first message must be
+ * {t:"auth", token}. Nothing else is accepted until it verifies.
+ */
+function authenticate(ws: WebSocket, headerToken: string | null): Promise<boolean> {
+  if (!gate.enabled) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = async (token: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ws.off("message", onMsg);
+      const r = await gate.check(token);
+      if (!r.ok) {
+        ws.close(r.status === 403 ? 4403 : 4401, r.error.slice(0, 120));
+        return resolve(false);
+      }
+      ws.send(JSON.stringify({ t: "authed" }));
+      resolve(true);
+    };
+    const onMsg = (raw: unknown) => {
+      try {
+        const m = JSON.parse(String(raw));
+        if (m.t === "auth") return void finish(typeof m.token === "string" ? m.token : null);
+      } catch {}
+      void finish(null);
+    };
+    const timer = setTimeout(() => void finish(headerToken), 5000);
+    ws.on("message", onMsg);
+  });
+}
 
 function attachEvents(ws: WebSocket) {
   eventClients.add(ws);
@@ -282,7 +378,8 @@ function attachTerminal(ws: WebSocket, id: string) {
 }
 
 server.listen(PORT, HOST, () => {
-  console.log(`\n  ♪ Octave running at http://localhost:${PORT}\n    state: ${HOME}\n`);
+  const where = PUBLIC_URL ? PUBLIC_URL.origin : `http://localhost:${PORT}`;
+  console.log(`\n  ♪ Octave running at ${where}\n    state: ${HOME}\n    auth:  ${gate.enabled ? "Clerk (owner-locked)" : "off (local only)"}\n`);
 });
 
 const shutdown = () => {
