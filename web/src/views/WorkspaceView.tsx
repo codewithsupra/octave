@@ -25,6 +25,11 @@ export function WorkspaceView({ ws, state, onRemoved }: { ws: Workspace; state: 
               <code>{ws.branch}</code> from <code>{ws.baseBranch}</code>
               <span className="sep" />
               {statusLabel(info?.status)}
+              {info && info.status !== "exited" && (
+                <span className={`src ${info.source === "hooks" ? "hooks" : ""}`} title={info.source === "hooks" ? "Status comes from the agent's own lifecycle hooks" : "No hook events yet; status is inferred from terminal activity"}>
+                  {info.source === "hooks" ? "live from hooks" : "from activity"}
+                </span>
+              )}
               <span className="sep" />
               <span title={`PORT and OCTAVE_PORT_0…9 are reserved for this workspace (${ws.ports.ports[0]}–${ws.ports.ports.at(-1)})`}>
                 ports {ws.ports.ports[0]}–{ws.ports.ports.at(-1)}
@@ -47,6 +52,12 @@ export function WorkspaceView({ ws, state, onRemoved }: { ws: Workspace; state: 
         </div>
       </header>
       {ws.prompt && <p className="task" title={ws.prompt}>{ws.prompt}</p>}
+      {info?.detail && info.status !== "running" && (
+        <p className={`ws-detail ${info.status === "attention" ? "attention" : ""}`} title={info.detail}>
+          <span className="muted">{info.status === "attention" ? "Asking:" : "Last message:"}</span>
+          <span>{info.detail}</span>
+        </p>
+      )}
       <div className={`ws-body ${showChanges ? "with-changes" : ""}`}>
         <Terminal workspaceId={ws.id} generation={info?.startedAt ?? 0} />
         {showChanges && <ChangesPanel ws={ws} />}

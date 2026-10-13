@@ -26,6 +26,8 @@ interface SimWs {
   listeners: Set<TermHandlers>;
   idleTimer?: number;
   line: string;
+  source: "activity" | "hooks";
+  detail: string | null;
   /** How this agent reacts to a Conflict Radar heads-up. */
   onHeadsUp?: () => void;
 }
@@ -119,7 +121,7 @@ export class DemoSim implements Backend {
 
   private snapshot(): AppState {
     const statuses: AppState["statuses"] = {};
-    for (const [id, s] of this.sims) statuses[id] = { status: s.status, exitCode: s.exitCode, lastOutputAt: s.lastOutputAt, startedAt: s.startedAt };
+    for (const [id, s] of this.sims) statuses[id] = { status: s.status, exitCode: s.exitCode, lastOutputAt: s.lastOutputAt, startedAt: s.startedAt, source: s.source, detail: s.detail };
     return {
       projects: [this.project],
       workspaces: this.order.map((id) => this.sims.get(id)!.ws),
@@ -135,13 +137,25 @@ export class DemoSim implements Backend {
     s.scrollback += d;
     s.lastOutputAt = Date.now();
     s.listeners.forEach((l) => l.onOut(d));
-    if (s.status !== "exited") {
+    // Like the server: once hooks report, output no longer drives status.
+    if (s.status !== "exited" && s.source === "activity") {
       if (s.status !== "running") { s.status = "running"; this.emit(); }
       clearTimeout(s.idleTimer);
       s.idleTimer = window.setTimeout(() => {
         if (s.status === "running") { s.status = "idle"; this.emit(); }
       }, 2200);
     }
+  }
+
+  /** A lifecycle hook event, as Claude Code / Codex would send it. */
+  private hook(id: string, state: "working" | "attention" | "idle", detail?: string) {
+    const s = this.sims.get(id);
+    if (!s || s.status === "exited") return;
+    clearTimeout(s.idleTimer);
+    s.source = "hooks";
+    if (detail !== undefined || state !== "working") s.detail = detail ?? null;
+    s.status = state === "working" ? "running" : state;
+    this.emit();
   }
 
   private exit(id: string, code: number) {
@@ -192,7 +206,7 @@ export class DemoSim implements Backend {
       tournamentId: opts.tournamentId,
       createdAt: Date.now(),
     };
-    const sim: SimWs = { ws, files: new Map(), status: "running", exitCode: null, startedAt: Date.now(), lastOutputAt: Date.now(), scrollback: "", listeners: new Set(), line: "" };
+    const sim: SimWs = { ws, files: new Map(), status: "running", exitCode: null, startedAt: Date.now(), lastOutputAt: Date.now(), scrollback: "", listeners: new Set(), line: "", source: "activity", detail: null };
     this.sims.set(id, sim);
     this.order.push(id);
     return sim;
@@ -215,13 +229,15 @@ export class DemoSim implements Backend {
     this.intro(bulk.ws.id, "claude", bulk.ws.prompt);
     const bulkEdit = file("src/cart.ts", "M", [[8, 10]], hunk(8, ['  if (code === "SAVE10") return total * 0.9;'], ['  if (code === "SAVE10") return total * 0.9;', '  if (code === "BULK20" && total > 200) return total * 0.8;'], cartCtx));
     this.play(bulk.ws.id, [
-      [900, () => this.write(bulk.ws.id, `${C.cyan("●")} Reading src/cart.ts, test/cart.test.ts\n`)],
+      [300, () => this.hook(bulk.ws.id, "working")],
+      [600, () => this.write(bulk.ws.id, `${C.cyan("●")} Reading src/cart.ts, test/cart.test.ts\n`)],
       [1300, () => { this.write(bulk.ws.id, `${C.cyan("●")} Edit ${C.bold("src/cart.ts")} ${C.green("+2")} ${C.red("-1")}\n`); this.edit(bulk.ws.id, bulkEdit); }],
       [1500, () => {
         this.write(bulk.ws.id, `${C.cyan("●")} Edit ${C.bold("test/cart.test.ts")} ${C.green("+6")}\n`);
         this.edit(bulk.ws.id, file("test/cart.test.ts", "M", [[20, 26]], hunk(20, [], ['test("BULK20 over $200", () => {', '  expect(applyDiscount(300, "BULK20")).toBe(240);', "});", 'test("BULK20 under $200", () => {', '  expect(applyDiscount(100, "BULK20")).toBe(100);', "});"])));
       }],
       [1200, () => this.write(bulk.ws.id, `${C.cyan("●")} Run ${C.bold("pnpm test")}\n  ${C.green("✓")} 16 passed ${C.dim("(412ms)")}\n\n${C.green("✓")} Done. BULK20 applies 20% off above $200, with tests.\n${AGENT_PROMPT.claude} `)],
+      [100, () => this.hook(bulk.ws.id, "idle", "Done. BULK20 applies 20% off above $200, with tests.")],
     ]);
 
     const refactor = this.add({ name: "discount-refactor", agent: "codex", prompt: "Refactor discounts into a lookup table" });
@@ -232,13 +248,16 @@ export class DemoSim implements Backend {
       [1400, () => this.write(refactor.ws.id, `${C.blue("▌")} exploring src/cart.ts\n`)],
       [2100, () => { this.write(refactor.ws.id, `${C.blue("▌")} apply_patch ${C.bold("src/cart.ts")} ${C.green("+2")} ${C.red("-2")}\n`); this.edit(refactor.ws.id, refactorConflicting); }],
       [1600, () => this.write(refactor.ws.id, `${C.blue("▌")} tests: 14 passed\n\nRefactor complete. Discounts now come from a RATES table.\n${AGENT_PROMPT.codex} `)],
+      [100, () => this.hook(refactor.ws.id, "idle", "Refactor complete. Discounts now come from a RATES table.")],
     ]);
     refactor.onHeadsUp = () => {
       const id = refactor.ws.id;
+      this.later(500, () => this.hook(id, "working"));
       this.later(900, () => this.write(id, `\n${C.yellow("!")} Understood: another agent owns applyDiscount() in src/cart.ts.\n`));
       this.later(2000, () => { this.write(id, `${C.blue("▌")} revert ${C.bold("src/cart.ts")}\n`); this.edit(id, null, "src/cart.ts"); });
       this.later(3200, () => { this.write(id, `${C.blue("▌")} apply_patch ${C.bold("src/discounts.ts")} ${C.green("+5")} (new file)\n`); this.edit(id, refactorSafe); });
       this.later(4300, () => this.write(id, `Moved the lookup table into src/discounts.ts so cart.ts stays untouched.\n${AGENT_PROMPT.codex} `));
+      this.later(4400, () => this.hook(id, "idle", "Moved the lookup table into src/discounts.ts so cart.ts stays untouched."));
     };
     bulk.onHeadsUp = () => {
       const id = bulk.ws.id;
@@ -261,7 +280,8 @@ export class DemoSim implements Backend {
     const sess = this.add({ name: "session-hardening", agent: "claude", prompt: "Shorten sessions to 15 minutes and drop the legacy token column" });
     this.intro(sess.ws.id, "claude", sess.ws.prompt);
     this.play(sess.ws.id, [
-      [1100, () => this.write(sess.ws.id, `${C.cyan("●")} Reading src/auth/session.ts, db/schema.sql\n`)],
+      [300, () => this.hook(sess.ws.id, "working")],
+      [800, () => this.write(sess.ws.id, `${C.cyan("●")} Reading src/auth/session.ts, db/schema.sql\n`)],
       [1400, () => {
         this.write(sess.ws.id, `${C.cyan("●")} Edit ${C.bold("src/auth/session.ts")} ${C.green("+1")} ${C.red("-1")}\n`);
         this.edit(sess.ws.id, file("src/auth/session.ts", "M", [[3, 3]], hunk(3, ["  const ttl = 60 * 60 * 1000; // 1 hour"], ["  const ttl = 15 * 60 * 1000; // 15 minutes"])));
@@ -270,7 +290,8 @@ export class DemoSim implements Backend {
         this.write(sess.ws.id, `${C.cyan("●")} Write ${C.bold("db/migrations/0042_sessions.sql")} ${C.green("+3")}\n`);
         this.edit(sess.ws.id, file("db/migrations/0042_sessions.sql", "A", [[1, 3]], hunk(1, [], ["ALTER TABLE sessions DROP COLUMN legacy_token;", "ALTER TABLE sessions ADD COLUMN rotated_at timestamptz;", "UPDATE sessions SET rotated_at = now();"])));
       }],
-      [1200, () => this.write(sess.ws.id, `\n${C.green("✓")} Sessions now last 15 minutes. Migration drops legacy_token.\n${AGENT_PROMPT.claude} `)],
+      [1200, () => this.write(sess.ws.id, `\n${C.cyan("●")} Bash ${C.bold("psql -f db/migrations/0042_sessions.sql")}\n\n  ${C.yellow("Allow this command?")}\n  ${C.bold("❯ 1. Yes")}\n    2. Yes, and don't ask again for psql\n    3. No, tell Claude what to do differently\n`)],
+      [100, () => this.hook(sess.ws.id, "attention", "Claude needs your permission to use Bash: psql -f db/migrations/0042_sessions.sql")],
     ]);
     // A teammate merges to main and touches the same line.
     this.later(9500, () => { this.base.set("src/auth/session.ts", [[3, 3]]); this.emit(); });

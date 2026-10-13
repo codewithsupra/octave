@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { agentCommand } from "./agents";
+import { GENERATED_FILES, codexNotifyFlag, installAgentHooks, mapHookEvent, newHookToken, tokenMatches, writeHookScript } from "./hooks";
 import { copyEnvFiles, setupScript, writePortEnv } from "./bootstrap";
 import * as G from "./git";
 import { PortAllocator, portEnv } from "./ports";
@@ -50,8 +51,18 @@ export class Octave {
   private diffCache = new Map<string, DiffSummary>();
   private mergeCache = new Map<string, G.MergePrediction>();
 
+  /** Where agent hooks report to, e.g. http://127.0.0.1:7420. Unset: hooks stay dormant. */
+  hookBase: string | null = null;
+  readonly hookScript: string;
+
   constructor(public store: Store) {
+    this.hookScript = writeHookScript(store.home);
     this.sessions.on("exit", (wsId: string, code: number) => this.onExit(wsId, code));
+  }
+
+  private command(agent: string, opts: { prompt?: string; headless?: boolean }): string {
+    const flags = agent === "codex" ? codexNotifyFlag(this.hookScript) : undefined;
+    return agentCommand(agent, { ...opts, flags });
   }
 
   // ---------- projects ----------
@@ -117,9 +128,10 @@ export class Octave {
     await this.excludeOctaveFiles(project.path);
     await writePortEnv(dir, env);
     const copiedEnv = await copyEnvFiles(project.path, dir);
+    const hooks = await installAgentHooks(dir, this.hookScript);
 
     const setup = opts.bootstrap === false ? null : setupScript(dir);
-    const agentCmd = agentCommand(opts.agent, { prompt: opts.prompt, headless: opts.headless });
+    const agentCmd = this.command(opts.agent, { prompt: opts.prompt, headless: opts.headless });
     const command = [setup && `echo '\\033[2m▸ octave setup: ${setup.replace(/'/g, "")}\\033[0m' && (${setup})`, agentCmd]
       .filter(Boolean)
       .join(" ; ");
@@ -138,6 +150,8 @@ export class Octave {
       copiedEnv,
       setup,
       tournamentId: opts.tournamentId,
+      hookToken: newHookToken(),
+      hooks,
       createdAt: Date.now(),
     };
     this.store.update((s) => s.workspaces.push(ws));
@@ -156,20 +170,39 @@ export class Octave {
     await mkdir(path.dirname(file), { recursive: true });
     const cur = existsSync(file) ? readFileSync(file, "utf8") : "";
     // .venv/ is created by the pip bootstrap and must not read as agent churn.
-    const want = [".env.octave", ".venv/"].filter((l) => !cur.split("\n").includes(l));
+    const want = [".env.octave", ".venv/", ...GENERATED_FILES].filter((l) => !cur.split("\n").includes(l));
     if (want.length) {
       await appendFile(file, `${cur && !cur.endsWith("\n") ? "\n" : ""}# octave\n${want.join("\n")}\n`);
     }
   }
 
   private wsEnv(ws: Workspace): Record<string, string> {
+    if (!ws.hookToken) {
+      const token = newHookToken();
+      this.store.update(() => (ws.hookToken = token));
+    }
     return {
       ...portEnv(ws.ports),
       OCTAVE: "1",
       OCTAVE_WORKSPACE: ws.name,
       OCTAVE_BRANCH: ws.branch,
       OCTAVE_BASE_BRANCH: ws.baseBranch,
+      ...(this.hookBase ? { OCTAVE_HOOK_URL: `${this.hookBase}/api/hooks/${ws.id}`, OCTAVE_HOOK_TOKEN: ws.hookToken! } : {}),
     };
+  }
+
+  /**
+   * An agent's lifecycle hook reported in. Authenticated by the workspace's
+   * own secret (hooks can't sign in), compared in constant time.
+   */
+  applyHook(wsId: string, authorization: string | undefined, agent: string, payload: Record<string, unknown>): "ok" | "ignored" | "forbidden" {
+    const ws = this.store.state.workspaces.find((w) => w.id === wsId);
+    if (!ws || !tokenMatches(ws.hookToken, authorization)) return "forbidden";
+    const ev = mapHookEvent(agent, payload);
+    const session = this.sessions.get(wsId);
+    if (!ev || !session) return "ignored";
+    session.applyHook(ev.state, ev.event, ev.detail);
+    return "ok";
   }
 
   startSession(ws: Workspace, keepShell: boolean, command = ws.command) {
@@ -178,7 +211,7 @@ export class Octave {
 
   restartWorkspace(wsId: string, mode: "agent" | "shell") {
     const ws = this.store.workspace(wsId);
-    const cmd = mode === "shell" ? "" : agentCommand(ws.agent, {});
+    const cmd = mode === "shell" ? "" : this.command(ws.agent, {});
     return this.startSession(ws, true, cmd);
   }
 

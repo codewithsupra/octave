@@ -68,6 +68,26 @@ Requirements: Node 20+ and git 2.38+. Runs on macOS and Linux, and on Windows vi
 | ![Review queue](web/public/shots/review.png) | ![Tournament](web/public/shots/tournament.png) |
 | ![Workspace](web/public/shots/workspace.png) | ![Sign in](docs/sign-in.png) |
 
+## Real agents: Claude Code, Codex, Cursor
+
+Octave runs each agent's own CLI in a real terminal inside the workspace's worktree, using your own login and subscription. Nothing is proxied. Install and log in once, and Octave detects it on your PATH:
+
+| Agent | Install | Log in | Status source |
+|---|---|---|---|
+| Claude Code | `npm i -g @anthropic-ai/claude-code` | run `claude` once | **hooks**: working, needs approval, finished (with last message) |
+| Codex | `npm i -g @openai/codex` | run `codex` once | **hooks**: turn finished (with last message) |
+| Cursor | Cursor's CLI installer (`cursor-agent`, or the newer `agent`) | `cursor-agent login` | hooks where the CLI fires them; activity otherwise |
+| Gemini, OpenCode, Aider, custom | their own installers | their own | activity (terminal output) |
+
+**Lifecycle hooks.** Octave writes a small observe-only hook config into every new worktree:
+- Claude Code: `.claude/settings.local.json`, using `UserPromptSubmit`, `PostToolUse`, `Notification`, `Stop` and `StopFailure`.
+- Cursor: `.cursor/hooks.json`, using `sessionStart`, `postToolUse` and `stop`.
+- Codex: a per-run `-c notify=[…]` flag, so no file is written.
+
+Each hook calls `~/.octave/hooks/octave-hook.sh`. The script posts the event to Octave with that workspace's own secret, is silent, gives up after 2 seconds, and **always exits 0**, so it can never block or steer the agent. It's a no-op if you run the agent outside Octave. The generated files never appear in diffs, and a hook file your repo already tracks is left untouched.
+
+Once an agent reports through a hook, hooks own its status. A long, silent test run stays *Working*, a permission prompt becomes *Needs your approval* with the exact request shown and a desktop notification, and a finished turn shows the agent's last message. Agents without hooks fall back to activity-based status.
+
 ## How it works
 
 ```

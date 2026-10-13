@@ -3,13 +3,16 @@ import type { Risk, Status } from "./types";
 
 export function StatusDot({ status, title }: { status?: Status; title?: string }) {
   const s = status ?? "exited";
-  const label = { running: "Working", idle: "Waiting on you", exited: "Stopped" }[s];
+  const label = statusLabel(s);
   return <span className={`dot dot-${s}`} title={title ?? label} aria-label={label} />;
 }
 
 export function statusLabel(s?: Status) {
-  return { running: "Working", idle: "Waiting on you", exited: "Stopped" }[s ?? "exited"];
+  return { running: "Working", idle: "Waiting on you", attention: "Needs your approval", exited: "Stopped" }[s ?? "exited"];
 }
+
+/** Statuses where the agent is blocked on the human. */
+export const needsYou = (s?: Status) => s === "idle" || s === "attention";
 
 export function RiskBadge({ risk }: { risk: Risk }) {
   return (

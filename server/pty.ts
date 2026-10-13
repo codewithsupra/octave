@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import * as nodePty from "node-pty";
 
-export type SessionStatus = "running" | "idle" | "exited";
+export type SessionStatus = "running" | "idle" | "attention" | "exited";
 
 const SCROLLBACK_BYTES = 512 * 1024;
 const IDLE_AFTER_MS = 4000;
@@ -43,14 +43,21 @@ export function shellInvocation(command: string, keepShell: boolean): { file: st
 
 /**
  * One PTY per workspace. Keeps a bounded scrollback so a browser tab that
- * attaches later (or reloads) sees the full history, and derives a status
- * from output activity: an agent that stops printing is waiting on you.
+ * attaches later (or reloads) sees the full history.
+ *
+ * Status has two sources. Until the agent reports through a lifecycle hook,
+ * it's inferred from output (an agent that stops printing is waiting on you).
+ * Once a hook event arrives, hooks own the status: a long, silent test run
+ * stays "running", and a permission prompt becomes "attention".
  */
 export class Session extends EventEmitter {
   status: SessionStatus = "running";
   exitCode: number | null = null;
   lastOutputAt = Date.now();
   startedAt = Date.now();
+  statusSource: "activity" | "hooks" = "activity";
+  detail: string | null = null;
+  lastHookEvent: string | null = null;
   private chunks: string[] = [];
   private bytes = 0;
   private proc: nodePty.IPty;
@@ -83,9 +90,24 @@ export class Session extends EventEmitter {
       this.bytes -= this.chunks.shift()!.length;
     }
     this.lastOutputAt = Date.now();
-    if (this.status === "idle") this.setStatus("running");
-    this.armIdle();
+    if (this.statusSource === "activity") {
+      if (this.status === "idle") this.setStatus("running");
+      this.armIdle();
+    }
     this.emit("data", d);
+  }
+
+  /** A lifecycle hook reported in; from now on hooks drive the status. */
+  applyHook(state: "working" | "attention" | "idle", event: string, detail?: string) {
+    if (this.status === "exited") return;
+    this.statusSource = "hooks";
+    this.lastHookEvent = event;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    if (detail !== undefined || state !== "working") this.detail = detail ?? null;
+    const next: SessionStatus = state === "working" ? "running" : state;
+    if (next === this.status) this.emit("status", this.status); // detail changed
+    else this.setStatus(next);
   }
 
   private armIdle() {
@@ -131,6 +153,8 @@ export interface SessionInfo {
   exitCode: number | null;
   lastOutputAt: number;
   startedAt: number;
+  source: "activity" | "hooks";
+  detail: string | null;
 }
 
 export class SessionManager extends EventEmitter {
@@ -157,7 +181,7 @@ export class SessionManager extends EventEmitter {
 
   statuses(): Record<string, SessionInfo> {
     const out: Record<string, SessionInfo> = {};
-    for (const [id, s] of this.sessions) out[id] = { status: s.status, exitCode: s.exitCode, lastOutputAt: s.lastOutputAt, startedAt: s.startedAt };
+    for (const [id, s] of this.sessions) out[id] = { status: s.status, exitCode: s.exitCode, lastOutputAt: s.lastOutputAt, startedAt: s.startedAt, source: s.statusSource, detail: s.detail };
     return out;
   }
 

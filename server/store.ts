@@ -25,6 +25,10 @@ export interface Workspace {
   copiedEnv: string[];
   setup: string | null;
   tournamentId?: string;
+  /** Per-workspace secret the agent's hook script presents to Octave. */
+  hookToken?: string;
+  /** Which agents got hook files in this worktree. */
+  hooks?: { claude: boolean; cursor: boolean };
   createdAt: number;
 }
 

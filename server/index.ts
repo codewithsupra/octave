@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyToken } from "@clerk/express";
 import { WebSocketServer, type WebSocket } from "ws";
-import { PRESETS, onPath } from "./agents";
+import { PRESETS, onPath, resolveBin } from "./agents";
 import { Gate, tokenFrom } from "./auth";
 import { git } from "./git";
 import { Octave } from "./octave";
@@ -95,6 +95,15 @@ const h =
 
 const p = (req: Request, k: string) => String(req.params[k]);
 
+// ---------- agent lifecycle hooks (authenticated by per-workspace secret, not Clerk) ----------
+
+octave.hookBase = `http://127.0.0.1:${PORT}`;
+app.post("/api/hooks/:id", express.json({ limit: "2mb" }), (req, res) => {
+  const agent = String(req.headers["x-octave-agent"] ?? "");
+  const r = octave.applyHook(String(req.params.id), req.headers.authorization, agent, (req.body ?? {}) as Record<string, unknown>);
+  res.status(r === "forbidden" ? 403 : 204).end();
+});
+
 // ---------- auth ----------
 
 /** Public: tells the UI whether to show Clerk, and with which key. */
@@ -122,7 +131,7 @@ app.get("/api/state", h(() => ({ ...store.state, statuses: octave.sessions.statu
 
 app.get(
   "/api/agents",
-  h(() => PRESETS.map((a) => ({ id: a.id, label: a.label, available: onPath(a.bin) }))),
+  h(() => PRESETS.map((a) => ({ id: a.id, label: a.label, available: resolveBin(a) !== null }))),
 );
 
 /** Git repos under common dev folders, for the "add project" picker. */

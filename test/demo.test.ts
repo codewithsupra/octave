@@ -37,6 +37,11 @@ describe("demo simulator (uses Octave's real scoring engines)", () => {
     const tri = await call<{ queue: { workspaceId: string; risk: { level: string } }[] }>(sim, "/api/projects/demo/triage");
     expect(tri.queue[0]).toMatchObject({ workspaceId: id("session-hardening"), risk: { level: "high" } });
 
+    const st = await call<{ statuses: Record<string, { status: string; source: string; detail: string | null }> }>(sim, "/api/state");
+    expect(st.statuses[id("session-hardening")]).toMatchObject({ status: "attention", source: "hooks" });
+    expect(st.statuses[id("session-hardening")].detail).toContain("permission");
+    expect(st.statuses[id("tax-by-region")].source).toBe("activity"); // gemini: no hooks
+
     const t = (await call<{ tournaments: { status: string; winner?: string; entrants: { verify?: { passed: boolean } }[] }[] }>(sim, "/api/state")).tournaments[0];
     expect(t.status).toBe("done");
     expect(t.entrants[0].verify?.passed).toBe(true);

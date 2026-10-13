@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, useAppState } from "./api";
 import type { Agent, AppState, Project } from "./types";
-import { Modal, StatusDot, Toasts, agentLabel, toast, useAsync } from "./ui";
+import { Modal, StatusDot, Toasts, agentLabel, needsYou, toast, useAsync } from "./ui";
 import { RadarView } from "./views/RadarView";
 import { ReviewView } from "./views/ReviewView";
 import { TournamentView } from "./views/TournamentView";
@@ -56,6 +56,7 @@ export function App({ mode = "local", banner, account }: { mode?: "local" | "aut
 
   const wss = project ? state.workspaces.filter((w) => w.projectId === project.id) : [];
   const waiting = wss.filter((w) => state.statuses[w.id]?.status === "idle").length;
+  const approvals = wss.filter((w) => state.statuses[w.id]?.status === "attention").length;
   const current = route.view === "ws" ? state.workspaces.find((w) => w.id === route.id) : undefined;
 
   return (
@@ -81,9 +82,15 @@ export function App({ mode = "local", banner, account }: { mode?: "local" | "aut
               <li><button className={route.view === "tournament" ? "on" : ""} onClick={() => go({ view: "tournament" })}>Tournament</button></li>
             </ul>
             <div className="ws-list-head">
-              <span>Workspaces{waiting > 0 && <span className="pill" title="Agents waiting on you">{waiting} waiting</span>}</span>
+              <span>Workspaces</span>
               <button className="ghost icon" onClick={() => setDialog("workspace")} aria-label="New workspace" title="New workspace (N)">+</button>
             </div>
+            {(approvals > 0 || waiting > 0) && (
+              <div className="ws-pills">
+                {approvals > 0 && <span className="pill attn" title="Agents asking for your permission">{approvals} to approve</span>}
+                {waiting > 0 && <span className="pill" title="Agents waiting on you">{waiting} waiting</span>}
+              </div>
+            )}
             <ul className="ws-list">
               {wss.length === 0 && <li className="muted small pad">No workspaces yet.</li>}
               {wss.filter((w) => !w.tournamentId).map((w) => (
@@ -182,9 +189,11 @@ function Welcome({ onAdd }: { onAdd: () => void }) {
 }
 
 function Home({ project, state, onNew, onOpen }: { project: Project; state: AppState; onNew: () => void; onOpen: (id: string) => void }) {
-  const wss = state.workspaces.filter((w) => w.projectId === project.id);
+  // Tournament entrants live on the Tournament page, not the main board.
+  const wss = state.workspaces.filter((w) => w.projectId === project.id && !w.tournamentId);
   const by = (s: string) => wss.filter((w) => (state.statuses[w.id]?.status ?? "exited") === s);
   const groups: [string, string, typeof wss][] = [
+    ...(by("attention").length ? [["attention", "Needs your approval", by("attention")] as [string, string, typeof wss]] : []),
     ["idle", "Waiting on you", by("idle")],
     ["running", "Working", by("running")],
     ["exited", "Stopped", by("exited")],
@@ -213,7 +222,7 @@ function Home({ project, state, onNew, onOpen }: { project: Project; state: AppS
                 <button key={w.id} className="ws-card" onClick={() => onOpen(w.id)}>
                   <b>{w.name}</b>
                   <span className="muted small">{agentLabel(w.agent)} on <code>{w.branch}</code></span>
-                  {w.prompt && <span className="small clamp">{w.prompt}</span>}
+                  {(state.statuses[w.id]?.detail || w.prompt) && <span className="small clamp">{state.statuses[w.id]?.detail ?? w.prompt}</span>}
                 </button>
               ))}
             </section>
@@ -331,15 +340,18 @@ function useAttentionAlerts(state: AppState | null) {
   const prev = useRef<Record<string, string>>({});
   useEffect(() => {
     if (!state) return;
-    const idle = state.workspaces.filter((w) => state.statuses[w.id]?.status === "idle");
+    const idle = state.workspaces.filter((w) => needsYou(state.statuses[w.id]?.status));
     document.title = idle.length ? `(${idle.length}) Octave` : "Octave";
     for (const w of state.workspaces) {
       const now = state.statuses[w.id]?.status;
       const was = prev.current[w.id];
-      if (was === "running" && (now === "idle" || now === "exited") && !w.tournamentId && document.hidden) {
-        if ("Notification" in window && Notification.permission === "granted") {
-          new Notification(`${w.name} ${now === "idle" ? "is waiting on you" : "finished"}`, { body: w.prompt ?? w.branch, tag: w.id });
-        }
+      const info = state.statuses[w.id];
+      // Permission prompts always notify; finished turns only when you're elsewhere.
+      const ask = now === "attention" && was !== "attention";
+      const done = was === "running" && (now === "idle" || now === "exited") && document.hidden;
+      if ((ask || done) && !w.tournamentId && "Notification" in window && Notification.permission === "granted") {
+        const title = ask ? `${w.name} needs your approval` : `${w.name} ${now === "idle" ? "is waiting on you" : "finished"}`;
+        new Notification(title, { body: info?.detail ?? w.prompt ?? w.branch, tag: w.id });
       }
       if (now) prev.current[w.id] = now;
     }

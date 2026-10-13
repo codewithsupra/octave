@@ -1,4 +1,4 @@
-export type Status = "running" | "idle" | "exited";
+export type Status = "running" | "idle" | "attention" | "exited";
 
 export interface Project { id: string; name: string; path: string; baseBranch: string }
 export interface Workspace {
@@ -14,7 +14,13 @@ export interface Tournament {
   id: string; projectId: string; prompt: string; verify: string; status: "running" | "judging" | "done";
   entrants: Entrant[]; winner?: string; createdAt: number;
 }
-export interface SessionInfo { status: Status; exitCode: number | null; lastOutputAt: number; startedAt: number }
+export interface SessionInfo {
+  status: Status; exitCode: number | null; lastOutputAt: number; startedAt: number;
+  /** "hooks" once the agent reports through lifecycle hooks; "activity" while inferred from output. */
+  source?: "activity" | "hooks";
+  /** The permission being asked for, or the agent's last message. */
+  detail?: string | null;
+}
 export interface AppState {
   projects: Project[]; workspaces: Workspace[]; tournaments: Tournament[];
   statuses: Record<string, SessionInfo>;

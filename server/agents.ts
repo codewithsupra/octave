@@ -10,11 +10,15 @@ export interface AgentPreset {
   id: string;
   label: string;
   bin: string;
-  /** Interactive TUI, optionally seeded with a first prompt. */
-  interactive: (prompt?: string) => string;
+  /** Other executable names for the same agent (first found on PATH wins). */
+  altBins?: string[];
+  /** Interactive TUI, optionally seeded with a first prompt. `flags` go right after the binary. */
+  interactive: (prompt?: string, flags?: string) => string;
   /** Non-interactive run that exits when the task is done (used by tournaments). */
-  headless: (prompt: string) => string;
+  headless: (prompt: string, flags?: string) => string;
 }
+
+const withFlags = (bin: string, flags?: string) => (flags ? `${bin} ${flags}` : bin);
 
 export const PRESETS: AgentPreset[] = [
   {
@@ -28,8 +32,8 @@ export const PRESETS: AgentPreset[] = [
     id: "codex",
     label: "Codex CLI",
     bin: "codex",
-    interactive: (p) => (p ? `codex ${q(p)}` : "codex"),
-    headless: (p) => `codex exec --full-auto ${q(p)}`,
+    interactive: (p, f) => (p ? `${withFlags("codex", f)} ${q(p)}` : withFlags("codex", f)),
+    headless: (p, f) => `${withFlags("codex", f)} exec --full-auto ${q(p)}`,
   },
   {
     id: "gemini",
@@ -49,6 +53,8 @@ export const PRESETS: AgentPreset[] = [
     id: "cursor-agent",
     label: "Cursor Agent",
     bin: "cursor-agent",
+    // Cursor renamed the CLI to `agent`; `cursor-agent` remains as an alias.
+    altBins: ["agent"],
     interactive: (p) => (p ? `cursor-agent ${q(p)}` : "cursor-agent"),
     headless: (p) => `cursor-agent -p ${q(p)} --force`,
   },
@@ -72,18 +78,34 @@ export function findPreset(id: string): AgentPreset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
 
-export function onPath(bin: string, envPath = process.env.PATH ?? ""): boolean {
-  if (!bin) return true;
+export function which(bin: string, envPath = process.env.PATH ?? ""): string | null {
   const exts = process.platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
   for (const dir of envPath.split(path.delimiter)) {
     for (const ext of exts) {
+      const full = path.join(dir, bin + ext);
       try {
-        accessSync(path.join(dir, bin + ext), constants.X_OK);
-        return true;
+        accessSync(full, constants.X_OK);
+        return full;
       } catch {}
     }
   }
-  return false;
+  return null;
+}
+
+export function onPath(bin: string, envPath = process.env.PATH ?? ""): boolean {
+  return !bin || which(bin, envPath) !== null;
+}
+
+/** The executable to run for a preset, or null when it isn't installed. */
+export function resolveBin(preset: AgentPreset, envPath = process.env.PATH ?? ""): string | null {
+  if (!preset.bin) return "";
+  if (which(preset.bin, envPath)) return preset.bin;
+  for (const alt of preset.altBins ?? []) {
+    const full = which(alt, envPath);
+    // `agent` is a generic name; only accept the one Cursor's installer puts in ~/.cursor/bin.
+    if (full && (alt !== "agent" || full.includes(`${path.sep}.cursor${path.sep}`))) return alt;
+  }
+  return null;
 }
 
 /** A user-defined command template; `{prompt}` is replaced with the quoted prompt. */
@@ -91,10 +113,13 @@ export function customCommand(template: string, prompt?: string): string {
   return template.includes("{prompt}") ? template.replaceAll("{prompt}", q(prompt ?? "")) : template;
 }
 
-export function agentCommand(agent: string, opts: { prompt?: string; headless?: boolean }): string {
+export function agentCommand(agent: string, opts: { prompt?: string; headless?: boolean; flags?: string; envPath?: string }): string {
   if (agent.startsWith("custom:")) return customCommand(agent.slice(7), opts.prompt);
   const preset = findPreset(agent);
   if (!preset) throw new Error(`Unknown agent "${agent}"`);
-  if (opts.headless) return preset.headless(opts.prompt ?? "");
-  return preset.interactive(opts.prompt);
+  let cmd = opts.headless ? preset.headless(opts.prompt ?? "", opts.flags) : preset.interactive(opts.prompt, opts.flags);
+  // Swap in an alternate executable name if that's what's installed.
+  const bin = preset.bin ? resolveBin(preset, opts.envPath) : null;
+  if (bin && bin !== preset.bin && cmd.startsWith(preset.bin)) cmd = bin + cmd.slice(preset.bin.length);
+  return cmd;
 }
