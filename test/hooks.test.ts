@@ -79,7 +79,7 @@ describe("hook installation", () => {
     const args = execFileSync("sh", ["-c", `printf '%s\\n' ${flag}`], { encoding: "utf8" }).trim().split("\n");
     expect(args).toEqual(["-c", 'notify=["/Users/me/.octave/hooks/octave-hook.sh","codex"]']);
     expect(agentCommand("codex", { prompt: "fix it", flags: flag })).toBe(`codex ${flag} 'fix it'`);
-    expect(agentCommand("codex", { prompt: "fix it", headless: true, flags: flag })).toBe(`codex ${flag} exec --full-auto 'fix it'`);
+    expect(agentCommand("codex", { prompt: "fix it", headless: true, flags: flag })).toBe(`codex ${flag} exec --sandbox workspace-write 'fix it'`);
   });
 
   it("finds Cursor under its new `agent` name only in ~/.cursor/bin", () => {

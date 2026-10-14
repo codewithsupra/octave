@@ -33,7 +33,8 @@ export const PRESETS: AgentPreset[] = [
     label: "Codex CLI",
     bin: "codex",
     interactive: (p, f) => (p ? `${withFlags("codex", f)} ${q(p)}` : withFlags("codex", f)),
-    headless: (p, f) => `${withFlags("codex", f)} exec --full-auto ${q(p)}`,
+    // `--full-auto` was removed in newer Codex; workspace-write keeps writes inside the worktree.
+    headless: (p, f) => `${withFlags("codex", f)} exec --sandbox workspace-write ${q(p)}`,
   },
   {
     id: "gemini",

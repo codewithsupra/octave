@@ -75,7 +75,7 @@ Octave runs each agent's own CLI in a real terminal inside the workspace's workt
 | Agent | Install | Log in | Status source |
 |---|---|---|---|
 | Claude Code | `npm i -g @anthropic-ai/claude-code` | run `claude` once | **hooks**: working, needs approval, finished (with last message) |
-| Codex | `npm i -g @openai/codex` | run `codex` once | **hooks**: turn finished (with last message) |
+| Codex | `npm i -g @openai/codex` | run `codex` once | **hooks**: turn finished (with last message). Verified with codex-cli 0.162 |
 | Cursor | Cursor's CLI installer (`cursor-agent`, or the newer `agent`) | `cursor-agent login` | hooks where the CLI fires them; activity otherwise |
 | Gemini, OpenCode, Aider, custom | their own installers | their own | activity (terminal output) |
 
