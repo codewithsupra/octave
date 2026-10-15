@@ -8,8 +8,21 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ]
   },
-  "include": ["server", "web/src", "test"]
+  "include": [
+    "server",
+    "web/src",
+    "test",
+    "e2e",
+    "playwright.config.ts",
+    "scripts"
+  ]
 }
