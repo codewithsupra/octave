@@ -4,6 +4,8 @@
 
 **Run a fleet of coding agents in parallel without them stepping on each other.**
 
+**Live demo:** [octave-roan.vercel.app/demo](https://octave-roan.vercel.app/demo). No install and no keys; it's the real UI and scoring, driven by simulated agents.
+
 Octave gives every agent its own git worktree, ports and env files, like other parallel-agent tools do. It then solves three problems that appear once you run more than two or three agents:
 
 | Problem | What Octave does |
@@ -124,6 +126,7 @@ npm run dev            # server (tsx watch) + Vite dev server on :5173
 npm test               # 55 Vitest tests: unit + integration on real git repos, PTYs, HTTP and WebSockets
 npm run test:coverage  # same, with coverage thresholds (lines >= 80%, branches >= 70%)
 npm run build && npm run test:e2e   # 22 Playwright tests incl. axe WCAG 2.1 A/AA scans
+BASE_URL=https://octave-roan.vercel.app npm run test:e2e   # same suite against the live deploy
 npm run smoke:agents   # opt-in: real Claude Code / Codex / Cursor runs (uses your logins)
 npm run typecheck
 ```
