@@ -1,5 +1,7 @@
 # Octave
 
+[![CI](https://github.com/codewithsupra/octave/actions/workflows/ci.yml/badge.svg)](https://github.com/codewithsupra/octave/actions/workflows/ci.yml)
+
 **Run a fleet of coding agents in parallel without them stepping on each other.**
 
 Octave gives every agent its own git worktree, ports and env files, like other parallel-agent tools do. It then solves three problems that appear once you run more than two or three agents:
@@ -41,7 +43,7 @@ npm run demo
 
 Then add your own repo from the UI and start Claude Code, Codex, Gemini CLI, OpenCode, Cursor Agent, Aider, or any command (`my-agent --task {prompt}`).
 
-Requirements: Node 20+ and git 2.38+. Runs on macOS and Linux, and on Windows via PowerShell, because the UI is just a browser tab.
+Requirements: Node 20+ and git 2.38+. Tested in CI on macOS and Linux. Windows isn't supported yet, because the integration tests and the hook script assume a POSIX shell.
 
 ## Features
 
@@ -107,7 +109,9 @@ Node server (Express + ws), bound to 127.0.0.1
 
 **Auth (Clerk).** When Clerk keys are present, every `/api` route and WebSocket requires a valid session token. Tokens are verified server-side and must be minted for Octave's own origin (`authorizedParties`). Browsers can't set headers on a WebSocket and tokens don't belong in URLs, so sockets authenticate with their first message. Signing in isn't enough by itself: the **first account to sign in becomes the owner**, and every other account gets a 403, unless it's listed in `OCTAVE_ALLOWED_USERS`. That matters because this server runs shells. With `OCTAVE_PUBLIC_URL` set, Octave can serve a remote machine, but it refuses to start that way without Clerk. Without keys, Octave runs in local-only mode.
 
-**Security.** The server can spawn shells, so by default it binds to loopback only and rejects any request or WebSocket whose `Host` or `Origin` isn't local. That blocks DNS-rebinding and cross-site WebSocket hijacking from a malicious web page. Agent shells get a clean environment, with package-manager and Octave-internal variables stripped.
+**Security.** The server can spawn shells, so by default it binds to loopback only and rejects any request or WebSocket whose `Host` or `Origin` isn't local. That blocks DNS-rebinding and cross-site WebSocket hijacking from a malicious web page. `/api` and the agent hook endpoint are rate limited, and a client that sends 20 bad hook secrets gets throttled. Agent shells get a clean environment, with package-manager and Octave-internal variables stripped.
+
+The design decisions, the full security model and the plan for team use are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Deploying the landing page and demo
 
@@ -116,10 +120,22 @@ The landing page and `/demo` need no server. `vercel.json` builds them as a stat
 ## Development
 
 ```bash
-npm run dev          # server (tsx watch) + Vite dev server on :5173
-npm test             # vitest: real git repos + real PTYs, auth gate, demo simulator
+npm run dev            # server (tsx watch) + Vite dev server on :5173
+npm test               # 55 Vitest tests: unit + integration on real git repos, PTYs, HTTP and WebSockets
+npm run test:coverage  # same, with coverage thresholds (lines >= 80%, branches >= 70%)
+npm run build && npm run test:e2e   # 22 Playwright tests incl. axe WCAG 2.1 A/AA scans
+npm run smoke:agents   # opt-in: real Claude Code / Codex / Cursor runs (uses your logins)
 npm run typecheck
 ```
+
+| Suite | Count | What it covers |
+|---|---|---|
+| Unit + integration (Vitest) | 55 | scoring engines, git snapshots and merge prediction, PTYs, hooks, the real HTTP/WebSocket server with Clerk token verification, rate limits |
+| Browser end to end (Playwright) | 22 | landing page, route code splitting, full demo flows, phone-width layout |
+| Accessibility (axe-core) | 5 of the 22 | WCAG 2.1 A/AA on the landing page and all demo views |
+| Coverage | 85% lines, 80% branches | `server/` and the demo simulator |
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs typecheck, tests with coverage thresholds and the build on Ubuntu and macOS, plus the Playwright suite on Ubuntu.
 
 State lives in `~/.octave` (override with `OCTAVE_HOME`). The port defaults to 7420 (`OCTAVE_PORT`).
 
