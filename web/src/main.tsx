@@ -1,154 +1,23 @@
-import { StrictMode, useEffect, useMemo, useState } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import { ClerkProvider, Show, SignIn, SignUp, UserButton, useAuth, useClerk } from "@clerk/react";
-import { dark } from "@clerk/ui/themes";
-import { App } from "./App";
-import { HttpError, api, realBackend, setBackend, setTokenProvider } from "./api";
-import { DemoSim } from "./demo/sim";
 import { Landing } from "./landing/Landing";
-import { linkProps, navigate, usePath } from "./router";
-import { Mark } from "./ui";
+import { usePath } from "./router";
+import { Splash } from "./ui";
 import "./styles.css";
+
+// Route-level code splitting: the landing page ships alone; the demo (xterm.js,
+// simulator) and the real app (Clerk, xterm.js) load only when visited.
+const DemoRoot = lazy(() => import("./roots/demo"));
+const ServerRoot = lazy(() => import("./roots/server"));
 
 function Root() {
   const path = usePath();
   if (path === "/" || path === "") return <Landing />;
-  if (path.startsWith("/demo")) return <DemoRoot />;
-  return <ServerRoot path={path} />;
-}
-
-// ---------- /demo: real UI, simulated backend ----------
-
-let sim: DemoSim | null = null;
-function DemoRoot() {
-  const s = useMemo(() => (sim ??= new DemoSim()), []);
-  setBackend(s);
-  const [key, setKey] = useState(0);
   return (
-    <App
-      key={key}
-      mode="demo"
-      banner={
-        <div className="demo-banner" role="note">
-          <span>
-            <b>Live demo.</b> Real Octave UI and scoring, simulated agents. Open the <a href="#/radar">Conflict radar</a>, click a red cell and warn an agent.
-          </span>
-          <span className="row">
-            <button className="ghost" onClick={() => { s.reset(); setKey((k) => k + 1); location.hash = ""; }}>Restart demo</button>
-            <a className="btn" {...linkProps("/")}>About Octave</a>
-          </span>
-        </div>
-      }
-    />
+    <Suspense fallback={<Splash text="Loading Octave…" />}>
+      {path.startsWith("/demo") ? <DemoRoot /> : <ServerRoot path={path} />}
+    </Suspense>
   );
-}
-
-// ---------- /app, /sign-in, /sign-up: the real thing ----------
-
-interface Config { authEnabled: boolean; publishableKey: string | null }
-
-function ServerRoot({ path }: { path: string }) {
-  const [config, setConfig] = useState<Config | null | "offline">(null);
-  useEffect(() => {
-    setBackend(realBackend);
-    fetch("/api/config")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setConfig)
-      .catch(() => setConfig("offline"));
-  }, []);
-
-  if (config === null) return <Splash text="Connecting to Octave…" />;
-  if (config === "offline") return <Offline />;
-  if (!config.authEnabled || !config.publishableKey) {
-    if (!path.startsWith("/app")) { navigate("/app", true); return null; }
-    return <App mode="local" />;
-  }
-  return (
-    <ClerkProvider
-      publishableKey={config.publishableKey}
-      routerPush={(to: string) => navigate(to)}
-      routerReplace={(to: string) => navigate(to, true)}
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
-      signInFallbackRedirectUrl="/app"
-      signUpFallbackRedirectUrl="/app"
-      afterSignOutUrl="/"
-      appearance={{
-        theme: dark,
-        variables: { colorPrimary: "#9AA8FF", colorBackground: "#222A3C", colorForeground: "#E3E8F3", colorMutedForeground: "#8E99B3", colorInput: "#151A27", colorPrimaryForeground: "#18203A", borderRadius: "10px", fontFamily: '"Schibsted Grotesk", system-ui, sans-serif' },
-      }}
-    >
-      {path.startsWith("/sign-in") ? (
-        <AuthPage><SignIn routing="path" path="/sign-in" signUpUrl="/sign-up" /></AuthPage>
-      ) : path.startsWith("/sign-up") ? (
-        <AuthPage><SignUp routing="path" path="/sign-up" signInUrl="/sign-in" /></AuthPage>
-      ) : (
-        <Show when="signed-in" fallback={<ToSignIn />}>
-          <AuthedApp />
-        </Show>
-      )}
-    </ClerkProvider>
-  );
-}
-
-function ToSignIn() {
-  const { isLoaded } = useAuth();
-  useEffect(() => { if (isLoaded) navigate("/sign-in", true); }, [isLoaded]);
-  return <Splash text="Checking your session…" />;
-}
-
-function AuthedApp() {
-  const { getToken } = useAuth();
-  const { signOut } = useClerk();
-  setTokenProvider(() => getToken());
-  const [access, setAccess] = useState<"checking" | "ok" | { error: string }>("checking");
-  useEffect(() => {
-    api("/api/me")
-      .then(() => setAccess("ok"))
-      .catch((e) => setAccess({ error: e instanceof HttpError && e.status === 403 ? e.message : `Couldn't reach Octave: ${e.message}` }));
-  }, []);
-  if (access === "checking") return <Splash text="Opening your workspaces…" />;
-  if (access !== "ok") {
-    return (
-      <div className="boot">
-        <h2>You can't use this Octave</h2>
-        <p className="muted narrow">{access.error}</p>
-        <button onClick={() => signOut({ redirectUrl: "/sign-in" })}>Sign in with a different account</button>
-      </div>
-    );
-  }
-  return <App mode="authed" account={<UserButton appearance={{ elements: { avatarBox: { width: 26, height: 26 } } }} />} />;
-}
-
-function AuthPage({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="auth-page">
-      <a className="brand" {...linkProps("/")}><Mark /> Octave</a>
-      {children}
-      <p className="muted small narrow">
-        Octave runs agents on this machine. The first account to sign in becomes its owner; other accounts are refused.
-      </p>
-    </div>
-  );
-}
-
-function Offline() {
-  return (
-    <div className="boot">
-      <Mark />
-      <h2>Octave runs on your machine</h2>
-      <p className="muted narrow">This page talks to the Octave server on your computer, and none is reachable here. Install it locally, or explore the live demo first.</p>
-      <pre className="install">git clone https://github.com/codewithsupra/octave{"\n"}cd octave && npm install && npm start</pre>
-      <div className="row">
-        <a className="btn" {...linkProps("/demo")}>Try the live demo</a>
-        <a className="btn ghost" {...linkProps("/")}>Back to the homepage</a>
-      </div>
-    </div>
-  );
-}
-
-function Splash({ text }: { text: string }) {
-  return <div className="boot"><Mark /><p className="muted">{text}</p></div>;
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><Root /></StrictMode>);

@@ -4,7 +4,7 @@ import type { Risk, Status } from "./types";
 export function StatusDot({ status, title }: { status?: Status; title?: string }) {
   const s = status ?? "exited";
   const label = statusLabel(s);
-  return <span className={`dot dot-${s}`} title={title ?? label} aria-label={label} />;
+  return <span className={`dot dot-${s}`} role="img" title={title ?? label} aria-label={label} />;
 }
 
 export function statusLabel(s?: Status) {
@@ -98,4 +98,8 @@ export function Mark() {
 /** Tournament entrants are named t-<id>-<agent>-<n>; show just <agent>-<n>. */
 export function displayName(name: string) {
   return name.replace(/^t-[0-9a-f]+-/, "");
+}
+
+export function Splash({ text }: { text: string }) {
+  return <div className="boot"><Mark /><p className="muted">{text}</p></div>;
 }
